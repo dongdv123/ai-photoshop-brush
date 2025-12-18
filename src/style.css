@@ -1,0 +1,12 @@
+/* Minimal styles */
+body {
+  margin: 0;
+  padding: 0;
+  background: #f7f7f8;
+  color: #111;
+}
+input, button {
+  font: inherit;
+}
+
+

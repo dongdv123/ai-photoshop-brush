@@ -1,0 +1,5 @@
+# Copy this file to .env (root) and set your Runware API key.
+# IMPORTANT: Do NOT commit a real .env with secrets to source control.
+VITE_RUNWARE_API_KEY=YOUR_RUNWARE_API_KEY_HERE
+
+
