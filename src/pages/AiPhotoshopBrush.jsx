@@ -5,7 +5,6 @@ import {
   generateImageWithRunware,
   removeImageBackground,
 } from '../services/runwareService';
-import { translateToEnglish } from '../services/translateService';
 
 export default function AiPhotoshopBrush() {
   const canvasRef = useRef(null);
@@ -24,6 +23,10 @@ export default function AiPhotoshopBrush() {
   const [uploadedImage, setUploadedImage] = useState(null);
   const [resultImage, setResultImage] = useState(null);
   const [editInstruction, setEditInstruction] = useState('');
+  // Generated prompt preview (shown to user before sending to inpaint)
+  const [generatedPrompt, setGeneratedPrompt] = useState('');
+  const [generatedMask, setGeneratedMask] = useState(null);
+  const [invertMask, setInvertMask] = useState(false);
   // Custom strength for manual control (default 0.75 for balanced edit)
   const [customStrength, setCustomStrength] = useState(0.75);
   const [loading, setLoading] = useState(false);
@@ -246,13 +249,7 @@ export default function AiPhotoshopBrush() {
       const bbox = getBoundingBox(paths);
       if (!bbox) throw new Error("Could not calculate selection bounds");
 
-      let prompt = editInstruction.trim();
-      let translatedPrompt = prompt;
-      try {
-        translatedPrompt = await translateToEnglish(prompt);
-      } catch (err) {
-        console.warn("Translation failed, using original:", err);
-      }
+      const prompt = editInstruction.trim();
 
       // Calculate position of selection for spatial context (3x3 grid)
       const centerX = (bbox.minX + bbox.maxX) / 2;
@@ -260,40 +257,28 @@ export default function AiPhotoshopBrush() {
       const relativeX = centerX / canvas.width;
       const relativeY = centerY / canvas.height;
 
-      // Determine position description (3x3 grid)
-      let positionDesc = '';
-      if (relativeY < 0.33) {
-        positionDesc = 'top';
-      } else if (relativeY > 0.67) {
-        positionDesc = 'bottom';
-      } else {
-        positionDesc = 'middle';
-      }
+      // 1. Determine position description (3x3 grid) and translate to Vietnamese
+      let posH = relativeX < 0.35 ? "left" : relativeX > 0.65 ? "right" : "center";
+      let posV = relativeY < 0.35 ? "top" : relativeY > 0.65 ? "bottom" : "middle";
+      const viPosH = posH === "left" ? "trái" : posH === "right" ? "phải" : "trung tâm";
+      const viPosV = posV === "top" ? "trên" : posV === "bottom" ? "dưới" : "trung tâm";
+      const positionDesc = (viPosV === "trung tâm" && viPosH === "trung tâm") ? "trung tâm" : `${viPosV} ${viPosH}`;
 
-      if (relativeX < 0.33) {
-        positionDesc += ' left';
-      } else if (relativeX > 0.67) {
-        positionDesc += ' right';
-      } else {
-        positionDesc += ' center';
-      }
+      // 2. Calculate size description based on area percentage coverage (Vietnamese)
+      const areaPercent = ((bbox.width * bbox.height) / (canvas.width * canvas.height)) * 100;
+      let sizeDesc = "cỡ vừa";
+      if (areaPercent < 1) sizeDesc = "rất nhỏ";
+      else if (areaPercent < 5) sizeDesc = "nhỏ";
+      else if (areaPercent > 40) sizeDesc = "rất lớn";
+      else if (areaPercent > 20) sizeDesc = "lớn";
 
-      // Calculate size description
-      const relativeWidth = bbox.width / canvas.width;
-      const relativeHeight = bbox.height / canvas.height;
-      const avgSize = (relativeWidth + relativeHeight) / 2;
+      // 3. Complete prompt in Vietnamese: Position + Size + Instruction
+      const enhancedPrompt = `Ở khu vực ${positionDesc}, ${prompt} ${sizeDesc}, được vẽ chân thực, phù hợp với ánh sáng và phong cách xung quanh.`;
 
-      let sizeDesc = '';
-      if (avgSize < 0.15) {
-        sizeDesc = 'small';
-      } else if (avgSize < 0.35) {
-        sizeDesc = 'medium';
-      } else {
-        sizeDesc = 'large';
-      }
-
-      // Complete prompt: Instruction + Position + Size
-      const enhancedPrompt = `${translatedPrompt}, ${sizeDesc} size, in the ${positionDesc} area, photorealistic, match surrounding lighting and style`;
+      // Set generated prompt into state so UI can show it for preview/debugging
+      setGeneratedPrompt(enhancedPrompt);
+      console.log("🚀 Final Enhanced Prompt:", enhancedPrompt);
+      console.log(`📊 Stats: Position=${positionDesc}, Size=${sizeDesc} (${areaPercent.toFixed(1)}% area)`);
 
       console.log(`🎨 Generating with strength: ${customStrength}`);
 
@@ -328,8 +313,28 @@ export default function AiPhotoshopBrush() {
         mctx.fill();
       });
 
-      const maskDataUrl = smartMaskCanvas.toDataURL('image/png');
+      let maskDataUrl = smartMaskCanvas.toDataURL('image/png');
+      // Optionally invert mask before sending (if user toggles)
+      if (invertMask) {
+        const invCanvas = document.createElement('canvas');
+        invCanvas.width = smartMaskCanvas.width;
+        invCanvas.height = smartMaskCanvas.height;
+        const ictx = invCanvas.getContext('2d');
+        ictx.drawImage(smartMaskCanvas, 0, 0);
+        const imgData = ictx.getImageData(0, 0, invCanvas.width, invCanvas.height);
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = 255 - data[i];
+          data[i+1] = 255 - data[i+1];
+          data[i+2] = 255 - data[i+2];
+        }
+        ictx.putImageData(imgData, 0, 0);
+        maskDataUrl = invCanvas.toDataURL('image/png');
+      }
       const maskImage = { mimeType: 'image/png', data: maskDataUrl.split(',')[1] };
+
+      // Set preview mask for UI
+      setGeneratedMask(maskDataUrl);
 
       // Call Runware Inpainting
       const inpaintResult = await inpaintImage(
@@ -356,7 +361,6 @@ export default function AiPhotoshopBrush() {
 
       // Clear selection paths to reset canvas to original state
       setPaths([]);
-      setCurrentPath([]);
       setCurrentPath([]);
 
       const endTime = Date.now();
@@ -603,6 +607,47 @@ export default function AiPhotoshopBrush() {
               marginBottom: 12
             }}
           />
+          
+          {/* Prompt preview for debugging and user confirmation */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', color: 'white', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              Prompt Preview
+            </label>
+            <textarea
+              value={generatedPrompt}
+              readOnly
+              rows={3}
+              placeholder="Generated prompt will appear here before sending..."
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: '#151226',
+                color: 'rgba(255,255,255,0.85)',
+                fontSize: 13,
+                fontFamily: 'inherit',
+                resize: 'vertical'
+              }}
+            />
+          </div>
+          
+          {/* Mask preview and invert toggle */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <label style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>Mask Preview</label>
+              <label style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>
+                <input type="checkbox" checked={invertMask} onChange={(e) => setInvertMask(e.target.checked)} /> Invert
+              </label>
+            </div>
+            <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)', background: '#0f0d18' }}>
+              {generatedMask ? (
+                <img src={generatedMask} alt="Mask preview" style={{ width: '100%', display: 'block' }} />
+              ) : (
+                <div style={{ padding: 12, color: 'rgba(255,255,255,0.35)' }}>Mask will appear here after generating.</div>
+              )}
+            </div>
+          </div>
 
 
           <button

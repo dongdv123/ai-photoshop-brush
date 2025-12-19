@@ -61,8 +61,8 @@ export const RunwareConfig = {
 
 export const DEFAULT_RUNWARE_CONFIG = {
   model: 'runware:100@1', // FLUX.1 Dev
-  width: 1024,
-  height: 1024,
+  width: 512,
+  height: 512,
   steps: 28,
   CFGScale: 3.5,
   strength: 0.75,
