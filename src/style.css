@@ -2,11 +2,14 @@
 body {
   margin: 0;
   padding: 0;
-  background: #f7f7f8;
-  color: #111;
+  background: #0f0e1a;
+  color: #e5e7eb;
 }
 input, button {
   font: inherit;
+}
+* {
+  box-sizing: border-box;
 }
 
 

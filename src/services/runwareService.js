@@ -1,16 +1,17 @@
 const RUNWARE_API_KEY = import.meta.env.VITE_RUNWARE_API_KEY;
+const RUNWARE_ENDPOINT = import.meta.env.VITE_RUNWARE_ENDPOINT || 'https://api.runware.ai/v1/image/inference';
 
 // Default Runware configuration
 const DEFAULT_RUNWARE_CONFIG = {
-  model: 'runware:100@1', // FLUX.1 Dev
+  model: import.meta.env.VITE_RUNWARE_MODEL || 'bfl:2@2',
   width: 1024,
   height: 1024,
   steps: 28,
-  CFGScale: 7.0, // Increased to make AI follow prompts more strictly
+  CFGScale: 7.0,
   strength: 0.75,
   outputFormat: 'WEBP'
 };
-const RUNWARE_API_URL = import.meta.env.VITE_RUNWARE_API_URL || 'https://api.runware.ai/v1';
+const RUNWARE_API_URL = RUNWARE_ENDPOINT;
 
 /**
  * Helper: mask API key for logging
@@ -57,6 +58,59 @@ function sanitizePrompt(input) {
     s = s.slice(0, 3000);
   }
   return s;
+}
+
+/**
+ * Check if model is a strict model (Flux Ultra, Flux Fill, P-Image) that rejects common params
+ * like steps, CFGScale, negativePrompt.
+ */
+function isStrictModel(model) {
+  const strictModels = [
+    'bfl:2@2',        // Flux 1.1 Pro Ultra
+    'runware:102@1',  // Flux Fill
+    'p-image',        // Pruna P-Image
+    'p-image-edit',   // Pruna P-Image-Edit
+    'prunaai:2@1'     // Pruna P-Image-Edit (AIR ID)
+  ];
+  const m = String(model).trim().toLowerCase();
+  // Check exact match or if it starts with one of the strict models (e.g. strict versioning)
+  return strictModels.some(sm => m === sm || m.startsWith(sm + ':'));
+}
+
+/**
+ * Supported dimensions for Flux 1.1 Pro Ultra (bfl:2@2)
+ */
+const FLUX_ULTRA_DIMENSIONS = [
+  { w: 3136, h: 1344, label: '21:9' },
+  { w: 2752, h: 1536, label: '16:9' },
+  { w: 2368, h: 1792, label: '4:3' },
+  { w: 2496, h: 1664, label: '3:2' },
+  { w: 2048, h: 2048, label: '1:1' },
+  { w: 1664, h: 2496, label: '2:3' },
+  { w: 1792, h: 2368, label: '3:4' },
+  { w: 1536, h: 2752, label: '9:16' },
+  { w: 1344, h: 3136, label: '9:21' }
+];
+
+/**
+ * Helper: Find closest supported dimension for Flux Ultra
+ */
+function getClosestFluxUltraDimensions(width, height) {
+  const targetRatio = width / height;
+  let best = FLUX_ULTRA_DIMENSIONS[0];
+  let minDiff = Number.MAX_VALUE;
+
+  for (const dim of FLUX_ULTRA_DIMENSIONS) {
+    const ratio = dim.w / dim.h;
+    const diff = Math.abs(ratio - targetRatio);
+    if (diff < minDiff) {
+      minDiff = diff;
+      best = dim;
+    }
+  }
+
+  console.log(`📏 Snapping dimensions from ${width}x${height} to ${best.w}x${best.h} (${best.label}) for Flux Ultra`);
+  return { width: best.w, height: best.h };
 }
 
 /**
@@ -226,15 +280,15 @@ export async function generateImageWithRunware(
 
   const requestBody = [
     {
-      taskType: 'imageInference',
+      taskType: import.meta.env.VITE_RUNWARE_TASK_TYPE || 'imageInference',
       taskUUID,
       positivePrompt: sanitizedPrompt,
-      negativePrompt: finalConfig.negativePrompt || 'blurry, low quality, distorted, ugly, bad anatomy, watermark, text, logo',
+      ...(isStrictModel(finalConfig.model) ? {} : { negativePrompt: finalConfig.negativePrompt || 'blurry, low quality, distorted, ugly, bad anatomy, watermark, text, logo' }),
       model: finalConfig.model,
-      width: finalConfig.width,
-      height: finalConfig.height,
-      steps: finalConfig.steps,
-      CFGScale: finalConfig.CFGScale,
+      width: finalConfig.model === 'bfl:2@2' ? getClosestFluxUltraDimensions(finalConfig.width, finalConfig.height).width : finalConfig.width,
+      height: finalConfig.model === 'bfl:2@2' ? getClosestFluxUltraDimensions(finalConfig.width, finalConfig.height).height : finalConfig.height,
+      ...(isStrictModel(finalConfig.model) ? {} : { steps: finalConfig.steps }),
+      ...(isStrictModel(finalConfig.model) ? {} : { CFGScale: finalConfig.CFGScale }),
       outputFormat: finalConfig.outputFormat,
       outputType: 'base64Data',
       numberResults: 1,
@@ -303,15 +357,15 @@ export async function generateImageFromReference(
 
   const requestBody = [
     {
-      taskType: 'imageInference',
+      taskType: import.meta.env.VITE_RUNWARE_TASK_TYPE || 'imageInference',
       taskUUID,
       positivePrompt: sanitizePrompt(prompt),
-      negativePrompt: 'blurry, low quality, distorted, ugly, bad anatomy, watermark, text, logo, different product, wrong shape',
+      ...(isStrictModel(finalConfig.model) ? {} : { negativePrompt: 'blurry, low quality, distorted, ugly, bad anatomy, watermark, text, logo, different product, wrong shape' }),
       model: finalConfig.model,
-      width: finalConfig.width,
-      height: finalConfig.height,
-      steps: finalConfig.steps,
-      CFGScale: finalConfig.CFGScale,
+      width: finalConfig.model === 'bfl:2@2' ? getClosestFluxUltraDimensions(finalConfig.width, finalConfig.height).width : finalConfig.width,
+      height: finalConfig.model === 'bfl:2@2' ? getClosestFluxUltraDimensions(finalConfig.width, finalConfig.height).height : finalConfig.height,
+      ...(isStrictModel(finalConfig.model) ? {} : { steps: finalConfig.steps }),
+      ...(isStrictModel(finalConfig.model) ? {} : { CFGScale: finalConfig.CFGScale }),
       outputFormat: finalConfig.outputFormat,
       outputType: 'base64Data',
       numberResults: 1,
@@ -501,22 +555,36 @@ export async function inpaintImage(
 
   const requestBody = [
     {
-      taskType: 'imageInference',
+      taskType: import.meta.env.VITE_RUNWARE_TASK_TYPE || 'imageInference',
       taskUUID,
       positivePrompt: sanitizePrompt(prompt),
-      negativePrompt: 'blurry, low quality, distorted, ugly, bad anatomy, watermark, text, logo',
-      model: finalConfig.model,
-      width: finalConfig.width,
-      height: finalConfig.height,
-      steps: finalConfig.steps,
-      CFGScale: finalConfig.CFGScale,
+      // Flux Fill (runware:102@1) supports standard params, unlike bfl:2@2
+      model: finalConfig.model === 'bfl:2@2' ? 'runware:102@1' : finalConfig.model,
+      width: finalConfig.model === 'bfl:2@2' ? getClosestFluxUltraDimensions(finalConfig.width, finalConfig.height).width : finalConfig.width,
+      height: finalConfig.model === 'bfl:2@2' ? getClosestFluxUltraDimensions(finalConfig.width, finalConfig.height).height : finalConfig.height,
+      ...(isStrictModel(finalConfig.model === 'bfl:2@2' ? 'runware:102@1' : finalConfig.model) ? {} : { steps: finalConfig.steps }),
+      ...(isStrictModel(finalConfig.model === 'bfl:2@2' ? 'runware:102@1' : finalConfig.model) ? {} : { CFGScale: finalConfig.CFGScale }),
       outputFormat: finalConfig.outputFormat,
       outputType: 'base64Data',
       numberResults: 1,
-      // Inpainting parameters - use seedImage with maskImage
-      seedImage: inputImageUUID,
-      maskImage: maskImageUUID,
-      strength: finalConfig.strength || 0.95 // High strength for inpainting
+      numberResults: 1,
+      // P-Image-Edit (prunaai:2@1) requirement:
+      // - Gateway rejected 'referenceImages'.
+      // - Backend demands 'inputs.referenceImages'.
+      // - SOLUTION: Pass 'inputs' object directly to bypass Gateway mapping/aliasing issues.
+      ...(['prunaai:2@1', 'p-image-edit'].includes(finalConfig.model)
+        ? {
+          inputs: {
+            referenceImages: [inputImageUUID]
+          }
+        }
+        : { seedImage: inputImageUUID, maskImage: maskImageUUID }
+      ),
+      // Flux Fill needs maskImage, but Pruna throws unsupportedParameter for it.
+      // So we bundle maskImage with seedImage logic above.
+      // Flux Fill (runware:102@1) and P-Image-Edit (prunaai:2@1) do NOT support strength.
+      // Reverting to strict check or specific exclusion list.
+      ...(['runware:102@1', 'prunaai:2@1', 'p-image-edit'].includes(finalConfig.model) ? {} : { strength: finalConfig.strength || 0.95 })
     }
   ];
 
