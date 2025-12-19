@@ -351,55 +351,13 @@ export default function AiPhotoshopBrush() {
         inpaintImg.src = inpaintUrl;
       });
 
-      // Composite result with FEATHERING
-      const origCtx = canvas.getContext('2d');
-      const tempInpaint = document.createElement('canvas');
-      tempInpaint.width = canvas.width;
-      tempInpaint.height = canvas.height;
-      const ipctx = tempInpaint.getContext('2d');
-      ipctx.drawImage(inpaintImg, 0, 0, canvas.width, canvas.height);
-
-      const origPixels = origCtx.getImageData(0, 0, canvas.width, canvas.height);
-      const inpaintPixels = ipctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      // Feather the mask for soft edges
-      const featherCanvas = document.createElement('canvas');
-      featherCanvas.width = smartMaskCanvas.width;
-      featherCanvas.height = smartMaskCanvas.height;
-      const fctx = featherCanvas.getContext('2d');
-      fctx.drawImage(smartMaskCanvas, 0, 0);
-
-      const blurRadius = Math.max(2, Math.floor(Math.min(canvas.width, canvas.height) * 0.01));
-      fctx.filter = `blur(${blurRadius}px)`;
-      fctx.drawImage(smartMaskCanvas, 0, 0);
-      fctx.filter = 'none';
-
-      const maskPixels = fctx.getImageData(0, 0, featherCanvas.width, featherCanvas.height);
-      const mData = maskPixels.data;
-
-      const outData = origPixels.data;
-      const inData = inpaintPixels.data;
-
-      for (let i = 0; i < outData.length; i += 4) {
-        const maskVal = (mData[i] / 255) * customStrength;
-
-        if (maskVal > 0) {
-          outData[i] = inData[i] * maskVal + outData[i] * (1 - maskVal);
-          outData[i + 1] = inData[i + 1] * maskVal + outData[i + 1] * (1 - maskVal);
-          outData[i + 2] = inData[i + 2] * maskVal + outData[i + 2] * (1 - maskVal);
-          outData[i + 3] = 255;
-        }
-      }
-
-      origCtx.putImageData(origPixels, 0, 0);
-
-      // Update history
-      const newHistory = history.slice(0, historyIndex + 1);
-      newHistory.push(canvas.toDataURL());
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-
+      // Show AI result directly in the "Edited Image" panel
       setResultImage(inpaintUrl);
+
+      // Clear selection paths to reset canvas to original state
+      setPaths([]);
+      setCurrentPath([]);
+      setCurrentPath([]);
 
       const endTime = Date.now();
       setProcessingTime(((endTime - startTime) / 1000).toFixed(1));

@@ -4,8 +4,8 @@ const RUNWARE_ENDPOINT = import.meta.env.VITE_RUNWARE_ENDPOINT || 'https://api.r
 // Default Runware configuration
 const DEFAULT_RUNWARE_CONFIG = {
   model: import.meta.env.VITE_RUNWARE_MODEL || 'bfl:2@2',
-  width: 1024,
-  height: 1024,
+  width: 512,
+  height: 512,
   steps: 28,
   CFGScale: 7.0,
   strength: 0.75,
